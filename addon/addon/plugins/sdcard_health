@@ -1,0 +1,151 @@
+#!/bin/sh
+# sdcard_health v2 - Checkmk local check for SD card wear and health
+#
+# Works on Raspberry Pi OS and on OpenCCU / RaspberryMatic (read-only root,
+# writable data partition on /usr/local). POSIX sh, runs under BusyBox ash.
+#
+# Output: Checkmk local check lines on stdout. Services:
+#   "SD writes <card-id>"  GB written to ALL ext4 partitions of the card (per physical card)
+#   "SD ext4 errors"       ext4 error counters and read-only remount of the expected rw mounts
+#   "Pi power"             under-voltage / throttling (needs vcgencmd)
+#   "SD card info"         card identity for the inventory
+#
+# Settings can be overridden through environment variables, e.g.
+#   WARN_GB=800 CRIT_GB=1400 ./sdcard_health_v2
+
+# ---- Configuration ---------------------------------------------------------
+# GB written since the card was first seen. Set to ~50% / ~80% of the card's
+# rated or estimated endurance.
+WARN_GB=${WARN_GB:-2000}
+CRIT_GB=${CRIT_GB:-3500}
+
+# Per-card baseline files. On OpenCCU/RaspberryMatic /var is volatile, so the
+# state is kept on the persistent /usr/local partition. Elsewhere /var/lib is used.
+# RW_MOUNTS lists the mounts that must be writable (a read-only remount = error).
+if [ -d /usr/local/addons ]; then
+    STATE_DIR=${STATE_DIR:-/usr/local/addons/sdcard_health}
+    RW_MOUNTS=${RW_MOUNTS:-/usr/local}
+else
+    STATE_DIR=${STATE_DIR:-/var/lib/check_mk_agent/sdcard_health}
+    RW_MOUNTS=${RW_MOUNTS:-/}
+fi
+# ----------------------------------------------------------------------------
+case "$0" in */addons/check_mk_agent/plugins/*) echo "<<<local:sep(0)>>>" ;; esac
+
+rd() { if [ -r "$1" ]; then cat "$1"; else echo unknown; fi; }
+
+# Name of the whole-disk block device (e.g. mmcblk0) behind a mount point.
+dev_of_mount() {
+    mm=$(awk -v m="$1" '$5 == m { v = $3 } END { print v }' /proc/self/mountinfo)
+    [ -n "$mm" ] || return 1
+    sys=$(readlink -f "/sys/dev/block/$mm" 2>/dev/null)
+    [ -n "$sys" ] || return 1
+    if [ -e "$sys/partition" ]; then
+        basename "$(dirname "$sys")"
+    else
+        basename "$sys"
+    fi
+}
+
+DEV=""
+for m in / /usr/local; do
+    d=$(dev_of_mount "$m")
+    case "$d" in mmcblk*) DEV=$d; break ;; esac
+done
+
+if [ -z "$DEV" ]; then
+    echo "0 \"SD card info\" - No MMC/SD device found behind / or /usr/local"
+    exit 0
+fi
+
+# ---- Card identity ----------------------------------------------------------
+CARD=/sys/block/$DEV/device
+C_NAME=$(rd $CARD/name)
+C_MANF=$(rd $CARD/manfid)
+C_OEM=$(rd $CARD/oemid)
+C_DATE=$(rd $CARD/date)
+C_SERIAL=$(rd $CARD/serial)
+C_TYPE=$(rd $CARD/type)
+ID=$(printf '%s_%s_%s' "$C_MANF" "$C_SERIAL" "$C_DATE" | tr -c 'A-Za-z0-9_.-' '_')
+
+echo "0 \"SD card info\" - $C_TYPE $C_NAME manf=$C_MANF oem=$C_OEM date=$C_DATE serial=$C_SERIAL device=$DEV"
+
+# ---- Writes and errors, summed over all ext4 partitions of the card ---------
+TOTAL=0
+ERRS=0
+DETAIL=""
+FOUND=0
+for d in /sys/fs/ext4/${DEV}p*; do
+    [ -r "$d/lifetime_write_kbytes" ] || continue
+    FOUND=1
+    p=$(basename "$d")
+    k=$(cat "$d/lifetime_write_kbytes")
+    TOTAL=$(awk -v a="$TOTAL" -v b="$k" 'BEGIN { printf "%.0f", a + b }')
+    DETAIL="$DETAIL $p=$(awk -v k="$k" 'BEGIN { printf "%.1f", k / 1048576 }')GB"
+    if [ -r "$d/errors_count" ]; then
+        e=$(cat "$d/errors_count")
+        ERRS=$((ERRS + e))
+    fi
+done
+
+if [ "$FOUND" -eq 1 ]; then
+    NOW=$(date +%s)
+    STATE="$STATE_DIR/$ID"
+    BASE=""; SINCE=""
+    mkdir -p "$STATE_DIR" 2>/dev/null
+    [ -f "$STATE" ] && read BASE SINCE < "$STATE"
+
+    # First run on this card, or the counter went backwards (image rolled back,
+    # counter reset): start a new baseline.
+    if [ -z "$BASE" ] || [ -z "$SINCE" ] || [ "$TOTAL" -lt "$BASE" ]; then
+        BASE=$TOTAL
+        SINCE=$NOW
+        echo "$BASE $SINCE" > "$STATE" 2>/dev/null
+    fi
+
+    set -- $(awk -v d=$((TOTAL - BASE)) -v s=$((NOW - SINCE)) 'BEGIN {
+        gb = d / 1048576; days = s / 86400;
+        printf "%.2f %.2f %.1f", gb, (days >= 1 ? gb / days : 0), days }')
+    GB=$1; RATE=$2; DAYS=$3
+    ALL=$(awk -v k="$TOTAL" 'BEGIN { printf "%.1f", k / 1048576 }')
+
+    echo "P \"SD writes $ID\" written_gb=$GB;$WARN_GB;$CRIT_GB|rate_gb_day=$RATE $GB GB written in $DAYS days (avg $RATE GB/day), card $C_NAME. Counter total $ALL GB:$DETAIL"
+else
+    echo "1 \"SD writes $ID\" - No ext4 lifetime_write_kbytes counters found for $DEV"
+fi
+
+# ---- Errors and read-only remount of the mounts that must be writable ------
+BAD=""
+for m in $RW_MOUNTS; do
+    o=$(awk -v m="$m" '$5 == m { v = $6 } END { print v }' /proc/self/mountinfo)
+    if [ -z "$o" ]; then
+        BAD="$BAD $m(not mounted)"
+    else
+        case ",$o," in *,ro,*) BAD="$BAD $m(read-only)" ;; esac
+    fi
+done
+
+if [ -n "$BAD" ]; then
+    echo "2 \"SD ext4 errors\" errors=$ERRS Problem with expected rw mounts:$BAD ($ERRS recorded errors)"
+elif [ "$ERRS" -gt 0 ]; then
+    echo "2 \"SD ext4 errors\" errors=$ERRS $ERRS filesystem errors recorded"
+else
+    echo "0 \"SD ext4 errors\" errors=0 No filesystem errors, rw mounts OK ($RW_MOUNTS)"
+fi
+
+# ---- Raspberry Pi power / throttling ----------------------------------------
+if command -v vcgencmd >/dev/null 2>&1; then
+    T=$(vcgencmd get_throttled 2>/dev/null | cut -d= -f2)
+    if [ -n "$T" ]; then
+        V=$((T))
+        if [ $((V & 1)) -ne 0 ]; then
+            echo "2 \"Pi power\" throttled=$V Under-voltage right now (flags $T)"
+        elif [ $((V & 65536)) -ne 0 ]; then
+            echo "1 \"Pi power\" throttled=$V Under-voltage occurred since boot (flags $T)"
+        elif [ "$V" -ne 0 ]; then
+            echo "0 \"Pi power\" throttled=$V Throttling flags $T (no under-voltage)"
+        else
+            echo "0 \"Pi power\" throttled=0 No under-voltage or throttling"
+        fi
+    fi
+fi

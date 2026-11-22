@@ -24,7 +24,8 @@ case "$1" in
   info)
     version=$(cat ${ADDON_DIR}/VERSION)
     echo "Info: <b>(Inoffical) check_mk agent</b></br>"
-    echo "Info: <a href='https://github.com/fuf42/homematic_check_mk' target='_blank'>https://github.com/fuf42/homematic_check_mk</a>"
+    echo "Info: <a href='https://github.com/4nn4n45/homematic_check_mk' target='_blank'>https://github.com/4nn4n45/homematic_check_mk</a>"
+    echo "Info: Fork of <a href='https://github.com/fuf42/homematic_check_mk' target='_blank'>fuf42/homematic_check_mk</a>"
     echo "Version: ${version}"
     echo "Name: check_mk_agent"
     echo "Operations: uninstall restart"
