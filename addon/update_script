@@ -4,6 +4,7 @@ ADDON_NAME=check_mk_agent
 CONFIG_DIR=/usr/local/etc/config
 ADDON_DIR=/usr/local/addons/${ADDON_NAME}
 RCD_DIR=${CONFIG_DIR}/rc.d
+WWW_DIR=${CONFIG_DIR}/addons/www/${ADDON_NAME}
 
 mount /usr/local || true
 
@@ -14,9 +15,12 @@ mkdir -p ${ADDON_DIR}/plugins
 chmod 755 ${ADDON_DIR}/plugins
 mkdir -p ${RCD_DIR}
 chmod 755 ${RCD_DIR}
+mkdir -p ${WWW_DIR}
+chmod 755 ${WWW_DIR}
 
 cp -af addon/* ${ADDON_DIR}
 cp -af rc.d/* ${RCD_DIR}
+cp -af www/* ${WWW_DIR}
 cp -af VERSION ${ADDON_DIR}
 
 sync

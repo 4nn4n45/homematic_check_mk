@@ -2,7 +2,7 @@
 
 ADDON_NAME=check_mk_agent
 ADDON_DIR=/usr/local/addons/${ADDON_NAME}
-#WWWDIR=/usr/local/etc/config/addons/www/${ADDON_NAME}
+WWWDIR=/usr/local/etc/config/addons/www/${ADDON_NAME}
 RCD_DIR=/usr/local/etc/config/rc.d
 
 case "$1" in
@@ -29,7 +29,7 @@ case "$1" in
     echo "Version: ${version}"
     echo "Name: check_mk_agent"
     echo "Operations: uninstall restart"
-    # echo "Update: /addons/${ADDON_NAME}/update.cgi"
+    echo "Update: /addons/${ADDON_NAME}/update-check.cgi"
     ;;
 
   uninstall)
