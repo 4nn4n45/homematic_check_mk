@@ -11,6 +11,7 @@ for f in /etc/config/rc.d/*; do
     v=$($f info | grep Version| cut -d: -f 2);
     n=$(echo $n) 
     v=$(echo $v)
+    [ -n "$n" ] || continue
     echo "local_addon| { \"name\": \"$n\", \"webversion\": \"$v\" }"; 
   fi; 
 done

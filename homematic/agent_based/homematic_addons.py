@@ -34,7 +34,14 @@ def parse_homematic_addons(string_table):
     t,d = line
     
     k = "remote" if t == "remote_addon" else "local"
-    v = json.loads(d)
+    try:
+      v = json.loads(d)
+    except ValueError:
+      continue
+    # an rc.d script without "Name:" in its info output gives an empty name
+    # (seen after the OpenCCU 3.89.14 upgrade); an empty item is not allowed
+    if not str(v.get("name", "")).strip():
+      continue
     # pprint.pprint(v)
     if not v['name'] in parsed:
       parsed[v['name']] = {}
