@@ -22,6 +22,15 @@ Don't hesitate to ask for additional check plugins.
 
 # Changes in this fork
 
+Addon 1.6.2:
+
+- New: the CCU's addon page can check for updates of this addon (see "Update check" below).
+
+Addon 1.6.1 / MKP 1.4.5:
+
+- The addon list ignores rc.d scripts without a name. A helper script that only handles `start` (for example an ethtool fix) has no `Name:` in its `info` output. This produced an addon with an empty name, and the Checkmk service discovery crashed with `'item' must be a non empty string`. The agent no longer reports such scripts, and the Checkmk plugin ignores them as well.
+- The agent no longer writes a syslog line for every connection (`connection accepted from ...`). Errors and start/stop messages are still logged. To get the connection messages back, remove the `#` in front of the `log "connection accepted ..."` line in `server.tcl`.
+
 Addon 1.6 / MKP 1.4.4:
 
 - Version lookup follows redirects (`curl -L`) and has a timeout. The old raspberrymatic.de address now redirects to openccu.de, which used to produce an empty "available" firmware version and a WARN.
@@ -40,8 +49,16 @@ The addon ships a plugin (`sdcard_health`) that reports as a local check:
 
 The write baseline is stored in `/usr/local/addons/sdcard_health/`, so it survives addon updates. On systems without an SD card, the plugin reports a single "no MMC/SD device found" info line.
 
+# Update check
+
+The CCU checks once a day for updates of its addons and shows the result on the addon page. This addon announces `www/update-check.cgi`, which reads the latest release of this repository from GitHub and prints its version number (`N/A` if the lookup fails). The CCU compares it with the installed version and offers a download link to the releases page.
+
+The Checkmk plugin shows the result in the service "Homematic Addon check_mk_agent": a newer release gives a WARN, `N/A` or an empty answer counts as unknown and stays OK.
+
+If you fork this repository, change the repository name in `addon/www/update-check.cgi`, otherwise your fork reports the releases of this one.
+
 # Installation
-- CCU Addon: Use the normal addon installation process of the CCU/Raspberrymatic/OpenCCU
+- CCU Addon: Download `check_mk_agent-<version>.tgz` from the [releases](https://github.com/4nn4n45/homematic_check_mk/releases) and use the normal addon installation process of the CCU/Raspberrymatic/OpenCCU
 - check_mk Plugin: Refer to the check_mk documentation, how to install MKP packages. Requires Checkmk 2.3 or newer.
 
 # License
